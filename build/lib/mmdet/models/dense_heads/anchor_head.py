@@ -190,6 +190,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                             unmap_outputs=True):
         """Compute regression and classification targets for anchors in a
         single image.
+
         Args:
             flat_anchors (Tensor): Multi-level anchors of the image, which are
                 concatenated into a single tensor of shape (num_anchors ,4)
@@ -198,7 +199,6 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                     shape (num_anchors,).
             gt_bboxes (Tensor): Ground truth bboxes of the image,
                 shape (num_gts, 4).
-            img_meta (dict): Meta info of the image.
             gt_bboxes_ignore (Tensor): Ground truth bboxes to be
                 ignored, shape (num_ignored_gts, 4).
             img_meta (dict): Meta info of the image.
@@ -207,6 +207,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
             label_channels (int): Channel of label.
             unmap_outputs (bool): Whether to map outputs back to the original
                 set of anchors.
+
         Returns:
             tuple:
                 labels_list (list[Tensor]): Labels of each level
@@ -220,17 +221,16 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                                            img_meta['img_shape'][:2],
                                            self.train_cfg.allowed_border)
         if not inside_flags.any():
-            return (None,) * 7
+            return (None, ) * 7
         # assign gt and sample anchors
         anchors = flat_anchors[inside_flags, :]
 
-        #         assign_result = self.assigner.assign(
-        #             anchors, gt_bboxes, gt_bboxes_ignore,
-        #             None if self.sampling else gt_labels)
-        #         sampling_result = self.sampler.sample(assign_result, anchors,
-        #                                               gt_bboxes)
+        # assign_result = self.assigner.assign(
+        #     anchors, gt_bboxes, gt_bboxes_ignore,
+        #     None if self.sampling else gt_labels)
+        # sampling_result = self.sampler.sample(assign_result, anchors,
+        #                                       gt_bboxes)
         num_level_anchors_inside = get_num_level_anchors_inside(num_level_anchors, inside_flags)
-
         if self.sampling:
             bbox_assigner = build_assigner(self.train_cfg.assigner)
             bbox_sampler = build_sampler(self.train_cfg.sampler)
@@ -349,6 +349,9 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
 
         # anchor number of multi levels
         num_level_anchors = [anchors.size(0) for anchors in anchor_list[0]]
+        num_level_anchors_list = []
+        for i in range(num_imgs):
+            num_level_anchors_list.append(num_level_anchors)
         # concat all level anchors to a single tensor
         concat_anchor_list = []
         concat_valid_flag_list = []
@@ -362,11 +365,12 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
             gt_bboxes_ignore_list = [None for _ in range(num_imgs)]
         if gt_labels_list is None:
             gt_labels_list = [None for _ in range(num_imgs)]
+
         results = multi_apply(
             self._get_targets_single,
             concat_anchor_list,
             concat_valid_flag_list,
-            num_level_anchors,
+            num_level_anchors_list,
             gt_bboxes_list,
             gt_bboxes_ignore_list,
             gt_labels_list,
@@ -375,6 +379,7 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
             unmap_outputs=unmap_outputs)
         (all_labels, all_label_weights, all_bbox_targets, all_bbox_weights,
          pos_inds_list, neg_inds_list, sampling_results_list) = results[:7]
+
         rest_results = list(results[7:])  # user-added return values
         # no valid anchors
         if any([labels is None for labels in all_labels]):
@@ -530,10 +535,12 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         """Transform network output for a batch into bbox predictions.
 
         Args:
-            cls_scores (list[Tensor]): Box scores for each scale level
-                Has shape (N, num_anchors * num_classes, H, W)
-            bbox_preds (list[Tensor]): Box energies / deltas for each scale
-                level with shape (N, num_anchors * 4, H, W)
+            cls_scores (list[Tensor]): Box scores for each level in the
+                feature pyramid, has shape
+                (N, num_anchors * num_classes, H, W).
+            bbox_preds (list[Tensor]): Box energies / deltas for each
+                level in the feature pyramid, has shape
+                (N, num_anchors * 4, H, W).
             img_metas (list[dict]): Meta information of each image, e.g.,
                 image size, scaling factor, etc.
             cfg (mmcv.Config | None): Test / postprocessing configuration,
@@ -585,8 +592,8 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         mlvl_anchors = self.anchor_generator.grid_anchors(
             featmap_sizes, device=device)
 
-        cls_score_list = [cls_scores[i].detach() for i in range(num_levels)]
-        bbox_pred_list = [bbox_preds[i].detach() for i in range(num_levels)]
+        mlvl_cls_scores = [cls_scores[i].detach() for i in range(num_levels)]
+        mlvl_bbox_preds = [bbox_preds[i].detach() for i in range(num_levels)]
 
         if torch.onnx.is_in_onnx_export():
             assert len(
@@ -604,19 +611,19 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
 
         if with_nms:
             # some heads don't support with_nms argument
-            result_list = self._get_bboxes(cls_score_list, bbox_pred_list,
+            result_list = self._get_bboxes(mlvl_cls_scores, mlvl_bbox_preds,
                                            mlvl_anchors, img_shapes,
                                            scale_factors, cfg, rescale)
         else:
-            result_list = self._get_bboxes(cls_score_list, bbox_pred_list,
+            result_list = self._get_bboxes(mlvl_cls_scores, mlvl_bbox_preds,
                                            mlvl_anchors, img_shapes,
                                            scale_factors, cfg, rescale,
                                            with_nms)
         return result_list
 
     def _get_bboxes(self,
-                    cls_score_list,
-                    bbox_pred_list,
+                    mlvl_cls_scores,
+                    mlvl_bbox_preds,
                     mlvl_anchors,
                     img_shapes,
                     scale_factors,
@@ -626,14 +633,17 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
         """Transform outputs for a batch item into bbox predictions.
 
         Args:
-            cls_score_list (list[Tensor]): Box scores for a single scale level
-                Has shape (N, num_anchors * num_classes, H, W).
-            bbox_pred_list (list[Tensor]): Box energies / deltas for a single
-                scale level with shape (N, num_anchors * 4, H, W).
-            mlvl_anchors (list[Tensor]): Box reference for a single scale level
-                with shape (num_total_anchors, 4).
-            img_shapes (list[tuple[int]]): Shape of the batch input image,
-                list[(height, width, 3)].
+            mlvl_cls_scores (list[Tensor]): Each element in the list is
+                the scores of bboxes of single level in the feature pyramid,
+                has shape (N, num_anchors * num_classes, H, W).
+            mlvl_bbox_preds (list[Tensor]):  Each element in the list is the
+                bboxes predictions of single level in the feature pyramid,
+                has shape (N, num_anchors * 4, H, W).
+            mlvl_anchors (list[Tensor]): Each element in the list is
+                the anchors of single level in feature pyramid, has shape
+                (num_anchors, 4).
+            img_shapes (list[tuple[int]]): Each tuple in the list represent
+                the shape(height, width, 3) of single image in the batch.
             scale_factors (list[ndarray]): Scale factor of the batch
                 image arange as list[(w_scale, h_scale, w_scale, h_scale)].
             cfg (mmcv.Config): Test / postprocessing configuration,
@@ -652,18 +662,20 @@ class AnchorHead(BaseDenseHead, BBoxTestMixin):
                 box.
         """
         cfg = self.test_cfg if cfg is None else cfg
-        assert len(cls_score_list) == len(bbox_pred_list) == len(mlvl_anchors)
-        batch_size = cls_score_list[0].shape[0]
+        assert len(mlvl_cls_scores) == len(mlvl_bbox_preds) == len(
+            mlvl_anchors)
+        batch_size = mlvl_cls_scores[0].shape[0]
         # convert to tensor to keep tracing
         nms_pre_tensor = torch.tensor(
             cfg.get('nms_pre', -1),
-            device=cls_score_list[0].device,
+            device=mlvl_cls_scores[0].device,
             dtype=torch.long)
 
         mlvl_bboxes = []
         mlvl_scores = []
-        for cls_score, bbox_pred, anchors in zip(cls_score_list,
-                                                 bbox_pred_list, mlvl_anchors):
+        for cls_score, bbox_pred, anchors in zip(mlvl_cls_scores,
+                                                 mlvl_bbox_preds,
+                                                 mlvl_anchors):
             assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
             cls_score = cls_score.permute(0, 2, 3,
                                           1).reshape(batch_size, -1,
