@@ -1,5 +1,6 @@
 # underwater-object-detection-mmdetection
 
+### models/dense_heads/anchor_head.py中有个bug，已改正
 
 ## [和鲸社区Kesci 水下目标检测算法赛（光学图像赛项）](https://www.heywhale.com/home/competition/605ab78821e3f6003b56a7d8/content)
 
