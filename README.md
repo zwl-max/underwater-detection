@@ -120,7 +120,7 @@
   + mosaic
   
 + 模型部分
-  + 对特征进行roimix(可能是代码问题)[RoIMix](https://arxiv.org/abs/1911.03029)
+  + 对特征进行roimix(可能是代码问题)
   + rpn采样器换成ATSS
   + PAFPN
   + DeformRoIPool替换RoIAlign
