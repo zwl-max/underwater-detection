@@ -1,7 +1,5 @@
 # underwater-object-detection-mmdetection
 
-### 2021.7.17 models/dense_heads/anchor_head.py中有个bug，已改正
-
 ## [和鲸社区Kesci 水下目标检测算法赛（光学图像赛项）](https://www.heywhale.com/home/competition/605ab78821e3f6003b56a7d8/content)
 
 ### A榜：第9  0.57286428 
@@ -137,8 +135,4 @@
    - [tile-detection](https://github.com/MySuperSoul/TileDetection)
 
 
-## Contact
-    author: tricks
-    qq：1227125939
-    email: 17760867927@163.com
 # underwater-detection
